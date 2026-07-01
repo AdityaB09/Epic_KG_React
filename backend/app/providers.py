@@ -20,8 +20,6 @@ async def fetch_firely_observations(patient_id: str | None = None) -> dict[str, 
         print("\n[FHIR REQUEST] provider=firely resource=Observation")
         print("BASE:", settings.FIRELY_BASE_URL)
         print("PARAMS:", params)
-        
-        
 
     bundle = await fhir_get(
         settings.FIRELY_BASE_URL,
@@ -37,41 +35,64 @@ async def fetch_firely_observations(patient_id: str | None = None) -> dict[str, 
     return bundle
 
 
-async def fetch_oracle_observations(
+async def fetch_firely_patient_resources(
+    resource_type: str,
+    patient_id: str | None,
+    *,
+    count: int = 50,
+) -> list[dict[str, Any]]:
+    if not patient_id:
+        return []
+
+    try:
+        bundle = await fhir_get(
+            settings.FIRELY_BASE_URL,
+            f"/{resource_type}",
+            params={
+                "patient": patient_id,
+                "_count": str(count),
+            },
+        )
+        return bundle_resources(bundle, resource_type)
+    except Exception:
+        return []
+
+
+def empty_bundle(message: str) -> dict[str, Any]:
+    return {
+        "resourceType": "Bundle",
+        "type": "searchset",
+        "total": 0,
+        "entry": [],
+        "issue": [
+            {
+                "severity": "information",
+                "code": "informational",
+                "diagnostics": message,
+            }
+        ],
+    }
+
+
+async def fetch_epic_observations(
     patient_id: str | None = None,
     *,
     access_token: str | None = None,
     fhir_base_url: str | None = None,
 ) -> dict[str, Any]:
-    base_url = (fhir_base_url or settings.ORACLE_FHIR_BASE_URL).rstrip("/")
+    base_url = (fhir_base_url or settings.EPIC_FHIR_BASE_URL).rstrip("/")
 
     if not base_url:
         raise HTTPException(
             status_code=500,
-            detail="ORACLE_FHIR_BASE_URL is not configured.",
+            detail="EPIC_FHIR_BASE_URL is not configured.",
         )
 
-    # IMPORTANT:
-    # In standalone SMART login with user/... scopes, Oracle may not give patient context.
-    # Do not call /Observation?_count=200 without patient context because Oracle rejects it.
     if not patient_id:
-        return {
-            "resourceType": "Bundle",
-            "type": "searchset",
-            "total": 0,
-            "entry": [],
-            "issue": [
-                {
-                    "severity": "information",
-                    "code": "informational",
-                    "diagnostics": (
-                        "No Oracle patient_id is available. "
-                        "The backend skipped Oracle Observation search to avoid a 400 response. "
-                        "Use EHR launch patient context or provide a known Oracle sandbox patient id."
-                    ),
-                }
-            ],
-        }
+        return empty_bundle(
+            "No Epic patient_id is available. The backend skipped Epic Observation search. "
+            "Use Epic EHR launch patient context or set EPIC_TEST_PATIENT_ID for sandbox testing."
+        )
 
     search_attempts = [
         {
@@ -93,7 +114,7 @@ async def fetch_oracle_observations(
 
     for params in search_attempts:
         if settings.DEBUG_FHIR_LOGS:
-            print("\n[FHIR REQUEST] provider=oracle resource=Observation")
+            print("\n[FHIR REQUEST] provider=epic resource=Observation")
             print("BASE:", base_url)
             print("PARAMS:", params)
             print("TOKEN:", "present" if access_token else "missing")
@@ -113,75 +134,55 @@ async def fetch_oracle_observations(
 
             raise
 
-    return {
-        "resourceType": "Bundle",
-        "type": "searchset",
-        "total": 0,
-        "entry": [],
-        "issue": [
-            {
-                "severity": "warning",
-                "code": "processing",
-                "diagnostics": (
-                    "Oracle Observation search failed for all patient search attempts. "
-                    f"Last error: {str(last_error)}"
-                ),
-            }
-        ],
-    }
+    return empty_bundle(
+        "Epic Observation search failed for all patient search attempts. "
+        f"Last error: {str(last_error)}"
+    )
 
 
-async def fetch_oracle_patient_resources(
+
+
+async def fetch_epic_patient_resources(
     resource_type: str,
-    patient_id: str,
+    patient_id: str | None,
     *,
     access_token: str | None = None,
     fhir_base_url: str | None = None,
     count: int = 50,
 ) -> list[dict[str, Any]]:
-    base_url = (fhir_base_url or settings.ORACLE_FHIR_BASE_URL).rstrip("/")
+    base_url = (fhir_base_url or settings.EPIC_FHIR_BASE_URL).rstrip("/")
 
-    if not base_url:
+    if not base_url or not patient_id:
         return []
 
-    if not patient_id:
-        return []
+    attempts = [
+        {
+            "patient": patient_id,
+            "_count": str(count),
+        },
+        {
+            "subject": f"Patient/{patient_id}",
+            "_count": str(count),
+        },
+    ]
 
-    params = {
-        "patient": patient_id,
-        "_count": str(count),
-    }
+    for params in attempts:
+        try:
+            bundle = await fhir_get(
+                base_url,
+                f"/{resource_type}",
+                params=params,
+                access_token=access_token,
+            )
+            return bundle_resources(bundle, resource_type)
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code in {400, 404}:
+                continue
+            return []
+        except Exception:
+            return []
 
-    try:
-        bundle = await fhir_get(
-            base_url,
-            f"/{resource_type}",
-            params=params,
-            access_token=access_token,
-        )
-        return bundle_resources(bundle, resource_type)
-
-    except httpx.HTTPStatusError as error:
-        # Retry with subject reference for resources that prefer subject.
-        if error.response.status_code in {400, 404}:
-            try:
-                bundle = await fhir_get(
-                    base_url,
-                    f"/{resource_type}",
-                    params={
-                        "subject": f"Patient/{patient_id}",
-                        "_count": str(count),
-                    },
-                    access_token=access_token,
-                )
-                return bundle_resources(bundle, resource_type)
-            except Exception:
-                return []
-
-        return []
-
-    except Exception:
-        return []
+    return []
 
 
 async def fetch_provider_observations(
@@ -191,13 +192,22 @@ async def fetch_provider_observations(
     access_token: str | None = None,
     fhir_base_url: str | None = None,
 ) -> dict[str, Any]:
-    return await fetch_oracle_observations(
-        patient_id,
-        access_token=access_token,
-        fhir_base_url=fhir_base_url,
+    provider = provider.lower()
+
+    if provider == "firely":
+        return await fetch_firely_observations(patient_id)
+
+    if provider == "epic":
+        return await fetch_epic_observations(
+            patient_id,
+            access_token=access_token,
+            fhir_base_url=fhir_base_url,
+        )
+
+    raise HTTPException(
+        status_code=400,
+        detail=f"Unsupported FHIR provider: {provider}",
     )
-
-
 
 
 async def fetch_provider_medications(
@@ -207,27 +217,51 @@ async def fetch_provider_medications(
     access_token: str | None = None,
     fhir_base_url: str | None = None,
 ) -> list[dict[str, Any]]:
+    provider = provider.lower()
+
     if not patient_id:
         return []
 
     resources: list[dict[str, Any]] = []
 
-    for resource_type in [
-        "MedicationRequest",
-        "MedicationAdministration",
-        "MedicationDispense",
-    ]:
-        resources.extend(
-            await fetch_oracle_patient_resources(
-                resource_type,
-                patient_id,
-                access_token=access_token,
-                fhir_base_url=fhir_base_url,
-                count=25,
+    if provider == "firely":
+        for resource_type in [
+            "MedicationRequest",
+            "MedicationAdministration",
+            "MedicationDispense",
+            "MedicationStatement",
+        ]:
+            resources.extend(
+                await fetch_firely_patient_resources(
+                    resource_type,
+                    patient_id,
+                    count=25,
+                )
             )
-        )
 
-    return resources
+        return resources
+
+    if provider == "epic":
+        for resource_type in [
+            "MedicationRequest",
+            "MedicationStatement",
+            "MedicationAdministration",
+            "MedicationDispense",
+        ]:
+            resources.extend(
+                await fetch_epic_patient_resources(
+                    resource_type,
+                    patient_id,
+                    access_token=access_token,
+                    fhir_base_url=fhir_base_url,
+                    count=25,
+                )
+            )
+
+        return resources
+
+    return []
+
 
 async def test_provider_status(
     provider: str,
@@ -247,21 +281,22 @@ async def test_provider_status(
             "fhirVersion": metadata.get("fhirVersion"),
         }
 
-    if provider == "oracle":
-        base_url = (fhir_base_url or settings.ORACLE_FHIR_BASE_URL).rstrip("/")
+    if provider == "epic":
+        base_url = (fhir_base_url or settings.EPIC_FHIR_BASE_URL).rstrip("/")
+
         if not base_url:
             return {
-                "provider": "oracle",
+                "provider": "epic",
                 "ok": False,
-                "error": "ORACLE_FHIR_BASE_URL is missing.",
+                "error": "EPIC_FHIR_BASE_URL is missing.",
             }
 
         result = {
-            "provider": "oracle",
+            "provider": "epic",
             "ok": True,
-            "mode": settings.ORACLE_MODE,
+            "mode": settings.EPIC_MODE,
             "baseUrl": base_url,
-            "clientIdConfigured": bool(settings.ORACLE_CLIENT_ID),
+            "clientIdConfigured": bool(settings.EPIC_CLIENT_ID),
         }
 
         try:
@@ -269,12 +304,18 @@ async def test_provider_status(
                 base_url,
                 "/.well-known/smart-configuration",
                 access_token=access_token,
+                extra_headers={"Epic-Client-ID": settings.EPIC_CLIENT_ID}
+                if settings.EPIC_CLIENT_ID
+                else None,
             )
             result["smartConfigurationAvailable"] = True
             result["authorizationEndpoint"] = smart_config.get("authorization_endpoint")
             result["tokenEndpoint"] = smart_config.get("token_endpoint")
             result["scopesSupported"] = smart_config.get("scopes_supported", [])
-            result["codeChallengeMethodsSupported"] = smart_config.get("code_challenge_methods_supported", [])
+            result["codeChallengeMethodsSupported"] = smart_config.get(
+                "code_challenge_methods_supported",
+                [],
+            )
         except Exception as error:
             result["smartConfigurationAvailable"] = False
             result["smartConfigurationError"] = str(error)
@@ -284,6 +325,9 @@ async def test_provider_status(
                 base_url,
                 "/metadata",
                 access_token=access_token,
+                extra_headers={"Epic-Client-ID": settings.EPIC_CLIENT_ID}
+                if settings.EPIC_CLIENT_ID
+                else None,
             )
             result["metadataAvailable"] = True
             result["fhirVersion"] = metadata.get("fhirVersion")

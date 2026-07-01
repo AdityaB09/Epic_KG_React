@@ -56,11 +56,18 @@ def safe_float(value: Any) -> float | None:
 def round_if_present(value: float | None, decimals: int = 0) -> float | int | None:
     if value is None:
         return None
+
     if decimals == 0:
         return int(round(value))
+
     return round(value, decimals)
 
-def clinically_plausible(field: str, value: float | int | None, unit: str | None = None) -> bool:
+
+def clinically_plausible(
+    field: str,
+    value: float | int | None,
+    unit: str | None = None,
+) -> bool:
     if value is None:
         return False
 
@@ -86,12 +93,12 @@ def clinically_plausible(field: str, value: float | int | None, unit: str | None
     return low <= value <= high
 
 
-
 def get_codes(codeable: dict[str, Any] | None) -> set[str]:
     if not codeable:
         return set()
 
     codes = set()
+
     for coding in codeable.get("coding", []) or []:
         code = coding.get("code")
         if code:
@@ -107,15 +114,19 @@ def has_any_code(resource_or_component: dict[str, Any], target_codes: list[str])
 
 def get_quantity_value(resource_or_component: dict[str, Any]) -> float | None:
     quantity = resource_or_component.get("valueQuantity")
+
     if not isinstance(quantity, dict):
         return None
+
     return safe_float(quantity.get("value"))
 
 
 def get_quantity_unit(resource_or_component: dict[str, Any]) -> str | None:
     quantity = resource_or_component.get("valueQuantity")
+
     if not isinstance(quantity, dict):
         return None
+
     return quantity.get("unit") or quantity.get("code")
 
 
@@ -134,8 +145,10 @@ def get_code_display(resource: dict[str, Any]) -> str:
 
 def get_subject_reference(resource: dict[str, Any]) -> str | None:
     subject = resource.get("subject")
+
     if isinstance(subject, dict):
         return subject.get("reference")
+
     return None
 
 
@@ -273,12 +286,14 @@ def extract_dashboard_values(
                         provider=provider,
                     )
 
-                    summary["matchedFields"].append({
-                        "field": field,
-                        "matchedCodes": codes,
-                        "value": quantity_value,
-                        "unit": unit,
-                    })
+                    summary["matchedFields"].append(
+                        {
+                            "field": field,
+                            "matchedCodes": codes,
+                            "value": quantity_value,
+                            "unit": unit,
+                        }
+                    )
 
         if values["systolic"] is None:
             systolic, systolic_unit, component_code = get_component_quantity_with_source(
@@ -288,6 +303,7 @@ def extract_dashboard_values(
 
             if systolic is not None and clinically_plausible("systolic", systolic, systolic_unit):
                 values["systolic"] = systolic
+
                 if timestamp:
                     timestamps["systolic"] = timestamp
 
@@ -300,13 +316,15 @@ def extract_dashboard_values(
                     component_code=component_code,
                 )
 
-                summary["matchedFields"].append({
-                    "field": "systolic",
-                    "matchedCodes": LOINC["systolic"],
-                    "value": systolic,
-                    "unit": systolic_unit,
-                    "componentCode": component_code,
-                })
+                summary["matchedFields"].append(
+                    {
+                        "field": "systolic",
+                        "matchedCodes": LOINC["systolic"],
+                        "value": systolic,
+                        "unit": systolic_unit,
+                        "componentCode": component_code,
+                    }
+                )
 
         if values["diastolic"] is None:
             diastolic, diastolic_unit, component_code = get_component_quantity_with_source(
@@ -316,6 +334,7 @@ def extract_dashboard_values(
 
             if diastolic is not None and clinically_plausible("diastolic", diastolic, diastolic_unit):
                 values["diastolic"] = diastolic
+
                 if timestamp:
                     timestamps["diastolic"] = timestamp
 
@@ -328,13 +347,15 @@ def extract_dashboard_values(
                     component_code=component_code,
                 )
 
-                summary["matchedFields"].append({
-                    "field": "diastolic",
-                    "matchedCodes": LOINC["diastolic"],
-                    "value": diastolic,
-                    "unit": diastolic_unit,
-                    "componentCode": component_code,
-                })
+                summary["matchedFields"].append(
+                    {
+                        "field": "diastolic",
+                        "matchedCodes": LOINC["diastolic"],
+                        "value": diastolic,
+                        "unit": diastolic_unit,
+                        "componentCode": component_code,
+                    }
+                )
 
         if summary["matchedFields"]:
             scan_report["matchedObservationCount"] += 1
@@ -486,13 +507,16 @@ def medication_name(resource: dict[str, Any]) -> str:
                 return str(display)
 
     med_ref = resource.get("medicationReference") or {}
+
     if isinstance(med_ref, dict):
         if med_ref.get("display"):
             return str(med_ref["display"])
+
         if med_ref.get("reference"):
             return str(med_ref["reference"])
 
     code = resource.get("code") or {}
+
     if isinstance(code, dict):
         if code.get("text"):
             return str(code["text"])
@@ -552,6 +576,7 @@ def dosage_text(resource: dict[str, Any]) -> str:
                 dose_quantity = dose_and_rate[0].get("doseQuantity", {})
                 value = dose_quantity.get("value")
                 unit = dose_quantity.get("unit") or dose_quantity.get("code")
+
                 if value is not None:
                     return f"{value} {unit or ''}".strip()
 
@@ -568,14 +593,17 @@ def dosage_text(resource: dict[str, Any]) -> str:
             return str(text)
 
         dose = instructions.get("dose")
+
         if isinstance(dose, dict):
             value = dose.get("value")
             unit = dose.get("unit") or dose.get("code")
+
             if value is not None:
                 return f"{value} {unit or ''}".strip()
 
         route = instructions.get("route", {})
         route_text = route.get("text") if isinstance(route, dict) else None
+
         if route_text:
             return str(route_text)
 
@@ -585,7 +613,6 @@ def dosage_text(resource: dict[str, Any]) -> str:
         return instructions
 
     return "Check dosage"
-
 
 
 def normalize_medications(resources: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -607,53 +634,56 @@ def normalize_medications(resources: list[dict[str, Any]]) -> list[dict[str, Any
 
             dose = dosage_text(resource)
 
-            meds.append({
-                "id": resource.get("id") or f"med-{index}",
-                "name": name,
-                "med": name,
-                "sub": resource.get("status") or resource_type,
-                "dose": dose,
-                "frequency": dose,
-                "prescribed": str(date)[:10],
-                "status": resource.get("status") or "available",
-                "sourceResource": resource_type,
-                "taken": [
-                    {
-                        "ok": resource.get("status") not in {
-                            "stopped",
-                            "cancelled",
-                            "entered-in-error",
-                        },
-                        "time": str(date)[11:16] if len(str(date)) >= 16 else "--",
-                        "source": resource_type,
-                    }
-                ],
-                "date": str(date)[:10],
-            })
+            meds.append(
+                {
+                    "id": resource.get("id") or f"med-{index}",
+                    "name": name,
+                    "med": name,
+                    "sub": resource.get("status") or resource_type,
+                    "dose": dose,
+                    "frequency": dose,
+                    "prescribed": str(date)[:10],
+                    "status": resource.get("status") or "available",
+                    "sourceResource": resource_type,
+                    "taken": [
+                        {
+                            "ok": resource.get("status") not in {
+                                "stopped",
+                                "cancelled",
+                                "entered-in-error",
+                            },
+                            "time": str(date)[11:16] if len(str(date)) >= 16 else "--",
+                            "source": resource_type,
+                        }
+                    ],
+                    "date": str(date)[:10],
+                }
+            )
 
         except Exception as error:
-            meds.append({
-                "id": resource.get("id") or f"med-error-{index}",
-                "name": resource.get("resourceType", "Medication"),
-                "med": resource.get("resourceType", "Medication"),
-                "sub": "FHIR medication parse warning",
-                "dose": "Check dosage",
-                "frequency": "Check dosage",
-                "prescribed": "FHIR record",
-                "status": "parse-warning",
-                "sourceResource": resource.get("resourceType", "Medication"),
-                "taken": [
-                    {
-                        "ok": False,
-                        "time": "--",
-                        "source": f"parse error: {str(error)}",
-                    }
-                ],
-                "date": "FHIR record",
-            })
+            meds.append(
+                {
+                    "id": resource.get("id") or f"med-error-{index}",
+                    "name": resource.get("resourceType", "Medication"),
+                    "med": resource.get("resourceType", "Medication"),
+                    "sub": "FHIR medication parse warning",
+                    "dose": "Check dosage",
+                    "frequency": "Check dosage",
+                    "prescribed": "FHIR record",
+                    "status": "parse-warning",
+                    "sourceResource": resource.get("resourceType", "Medication"),
+                    "taken": [
+                        {
+                            "ok": False,
+                            "time": "--",
+                            "source": f"parse error: {str(error)}",
+                        }
+                    ],
+                    "date": "FHIR record",
+                }
+            )
 
     return meds
-
 
 
 def build_context_alerts(
@@ -662,6 +692,7 @@ def build_context_alerts(
     medications: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     alerts = []
+
     med_text = " ".join(
         f"{med.get('name', '')} {med.get('med', '')}".lower()
         for med in medications
@@ -674,42 +705,98 @@ def build_context_alerts(
     wbc = values.get("wbc")
     temp = values.get("temperature")
     glucose = values.get("glucose")
+    heart_rate = values.get("heartRate")
+
+    beta_blockers = [
+        "metoprolol",
+        "atenolol",
+        "carvedilol",
+        "propranolol",
+        "bisoprolol",
+        "labetalol",
+    ]
+
+    glucose_lowering = [
+        "insulin",
+        "glipizide",
+        "glyburide",
+        "glimepiride",
+        "metformin",
+        "semaglutide",
+        "liraglutide",
+    ]
+
+    if heart_rate is not None and heart_rate <= 55:
+        if any(name in med_text for name in beta_blockers):
+            alerts.append(
+                {
+                    "id": "bradycardia-beta-blocker-context",
+                    "level": "warning",
+                    "title": "Bradycardia with beta blocker context",
+                    "message": (
+                        f"Heart rate is {heart_rate} bpm and beta blocker therapy "
+                        "appears in the medication context."
+                    ),
+                }
+            )
+
+    if glucose is not None and glucose <= 70:
+        if any(name in med_text for name in glucose_lowering):
+            alerts.append(
+                {
+                    "id": "hypoglycemia-medication-context",
+                    "level": "critical" if glucose <= 55 else "warning",
+                    "title": "Low glucose with medication context",
+                    "message": (
+                        f"Glucose is {glucose} with insulin or glucose-lowering therapy "
+                        "in the medication context."
+                    ),
+                }
+            )
 
     if potassium is not None and potassium >= 5.5:
         if "spironolactone" in med_text and creatinine is not None and creatinine >= 1.45:
-            alerts.append({
-                "id": "hyperkalemia-renal-med-context",
-                "level": "critical",
-                "title": "High potassium with renal and medication context",
-                "message": (
-                    f"Potassium is {potassium} with creatinine {creatinine}. "
-                    "Spironolactone appears in the medication context."
-                ),
-            })
+            alerts.append(
+                {
+                    "id": "hyperkalemia-renal-med-context",
+                    "level": "critical",
+                    "title": "High potassium with renal and medication context",
+                    "message": (
+                        f"Potassium is {potassium} with creatinine {creatinine}. "
+                        "Spironolactone appears in the medication context."
+                    ),
+                }
+            )
 
     if spo2 is not None and spo2 <= 90 and rr is not None and (rr >= 24 or rr <= 11):
-        alerts.append({
-            "id": "oxygenation-respiratory-pattern",
-            "level": "critical",
-            "title": "Low SpO2 with abnormal respiratory rate",
-            "message": f"SpO2 is {spo2}% with respiratory rate {rr}/min.",
-        })
+        alerts.append(
+            {
+                "id": "oxygenation-respiratory-pattern",
+                "level": "critical",
+                "title": "Low SpO2 with abnormal respiratory rate",
+                "message": f"SpO2 is {spo2}% with respiratory rate {rr}/min.",
+            }
+        )
 
     if wbc is not None and wbc >= 12 and temp is not None and temp >= 38.0:
-        alerts.append({
-            "id": "infection-inflammatory-pattern",
-            "level": "warning",
-            "title": "High WBC with fever pattern",
-            "message": f"WBC is {wbc} and temperature is {temp}°C.",
-        })
+        alerts.append(
+            {
+                "id": "infection-inflammatory-pattern",
+                "level": "warning",
+                "title": "High WBC with fever pattern",
+                "message": f"WBC is {wbc} and temperature is {temp}°C.",
+            }
+        )
 
     if glucose is not None and (glucose >= 220 or glucose <= 55):
-        alerts.append({
-            "id": "abnormal-glucose-trend",
-            "level": "critical" if glucose <= 55 else "warning",
-            "title": "Abnormal glucose trend",
-            "message": f"Glucose is {glucose}. Review trend and medication context.",
-        })
+        alerts.append(
+            {
+                "id": "abnormal-glucose-trend",
+                "level": "critical" if glucose <= 55 else "warning",
+                "title": "Abnormal glucose trend",
+                "message": f"Glucose is {glucose}. Review trend and medication context.",
+            }
+        )
 
     return alerts
 
@@ -759,7 +846,10 @@ def build_interpretation(
         rhythm = f"Heart rate is {hr} bpm and potassium is {potassium} mmol/L."
 
     if spo2 <= 90 and rr >= 24:
-        ppg = f"SpO2 is {spo2}% with respiratory rate {rr}/min. This increases concern for oxygenation compromise."
+        ppg = (
+            f"SpO2 is {spo2}% with respiratory rate {rr}/min. "
+            "This increases concern for oxygenation compromise."
+        )
     elif spo2 <= 94:
         ppg = f"SpO2 is {spo2}%. Continue monitoring oxygen saturation and PPG waveform quality."
     else:
@@ -772,7 +862,10 @@ def build_interpretation(
     )
 
     if potassium >= 5.5 and creatinine >= 1.45 and "spironolactone" in med_text:
-        likely += " High potassium plus rising creatinine plus spironolactone context may suggest renal or potassium-retaining medication contribution."
+        likely += (
+            " High potassium plus rising creatinine plus spironolactone context "
+            "may suggest renal or potassium-retaining medication contribution."
+        )
 
     if wbc >= 12 and temp >= 38.0:
         likely += " High WBC plus fever pattern may suggest infectious or inflammatory stress."
@@ -816,15 +909,14 @@ def build_field_debug(
             "source": source_type,
             "finalValue": final_values.get(field),
             "rawFhirValue": raw_values.get(field),
-            "rawFirelyValue": raw_values.get(field),  # temporary old frontend compatibility
             "fallbackUsed": came_from_fallback,
             "timestamp": timestamps.get(field),
             "color": colors.get(field),
             "fhirObservation": source,
-            "firelyObservation": source,  # temporary old frontend compatibility
         }
 
     return details
+
 
 
 def build_priority_trends(
@@ -835,16 +927,26 @@ def build_priority_trends(
     fallback_used: list[str],
 ) -> list[dict[str, Any]]:
     severity_weight = {"red": 100, "yellow": 50, "blue": 0}
+
     medication_text = " ".join(
         f"{med.get('name', '')} {med.get('med', '')}".lower()
         for med in medications
     )
 
-    priority_fields = ["potassium", "creatinine", "glucose", "wbc", "spo2", "respiratoryRate"]
+    priority_fields = [
+        "potassium",
+        "creatinine",
+        "glucose",
+        "wbc",
+        "spo2",
+        "respiratoryRate",
+    ]
+
     trends = []
 
     for field in priority_fields:
         value = values.get(field)
+
         if value is None:
             continue
 
@@ -869,6 +971,7 @@ def build_priority_trends(
             reason += " using fallback demo value"
 
         demo_trend = [value]
+
         if isinstance(value, (int, float)):
             demo_trend = [
                 round(value * 0.92, 2),
@@ -877,17 +980,19 @@ def build_priority_trends(
                 value,
             ]
 
-        trends.append({
-            "field": field,
-            "label": FIELD_LABELS.get(field, field),
-            "value": value,
-            "displayValue": str(value),
-            "color": color,
-            "trend": demo_trend,
-            "score": score,
-            "reason": reason,
-            "meta": timestamps.get(field) or "latest FHIR",
-        })
+        trends.append(
+            {
+                "field": field,
+                "label": FIELD_LABELS.get(field, field),
+                "value": value,
+                "displayValue": str(value),
+                "color": color,
+                "trend": demo_trend,
+                "score": score,
+                "reason": reason,
+                "meta": timestamps.get(field) or "latest FHIR",
+            }
+        )
 
     return sorted(trends, key=lambda item: item["score"], reverse=True)[:4]
 
@@ -945,12 +1050,14 @@ def to_dashboard_frame(
     latest_timestamp = max(timestamps.values()) if timestamps else now_iso()
 
     fhir_fields = [
-        field for field, value in raw_values.items()
+        field
+        for field, value in raw_values.items()
         if value is not None
     ]
 
     missing_raw_fields = [
-        field for field, value in raw_values.items()
+        field
+        for field, value in raw_values.items()
         if value is None
     ]
 
@@ -969,22 +1076,16 @@ def to_dashboard_frame(
         "timestamp": latest_timestamp,
         "receivedAt": now_iso(),
         "overallColor": color,
-
         "dataQuality": {
             "fhirFieldCount": len(fhir_fields),
-            "firelyFieldCount": len(fhir_fields),  # temporary compatibility
             "fallbackFieldCount": len(fallback_used),
             "fhirFields": fhir_fields,
-            "firelyFields": fhir_fields,  # temporary compatibility
             "fallbackFields": fallback_used,
             "missingRawFhirFields": missing_raw_fields,
-            "missingRawFirelyFields": missing_raw_fields,  # temporary compatibility
             "observationCount": scan_report["observationCount"],
             "matchedObservationCount": scan_report["matchedObservationCount"],
         },
-
         "fallbackUsed": fallback_used,
-
         "vitals": {
             "heartRate": values["heartRate"],
             "respiratoryRate": values["respiratoryRate"],
@@ -993,14 +1094,12 @@ def to_dashboard_frame(
             "diastolic": values["diastolic"],
             "temperature": values["temperature"],
         },
-
         "labs": {
             "glucose": values["glucose"],
             "potassium": values["potassium"],
             "creatinine": values["creatinine"],
             "wbc": values["wbc"],
         },
-
         "colors": colors,
         "interpretation": interpretation,
         "contextAlerts": context_alerts,
@@ -1017,11 +1116,9 @@ def to_dashboard_frame(
     if include_debug:
         frame["debug"] = {
             "rawExtractedFhirValues": raw_values,
-            "rawExtractedFirelyValues": raw_values,  # temporary compatibility
             "finalDashboardValues": values,
             "fieldDetails": field_debug,
             "fhirScan": scan_report,
-            "firelyScan": scan_report,  # temporary compatibility
         }
 
     return frame

@@ -184,17 +184,17 @@ function formatStreamDate(timestamp) {
   }).format(date);
 }
 
-function mergeFirelyFrameIntoLive(prev, frame) {
+function mergeFhirFrameIntoLive(prev, frame) {
   if (!frame) return prev;
 
   if (frame.status === "error" || frame.error) {
     return {
       ...prev,
-      firelyStatus: "error",
+      fhirStatus: "error",
       alertColor: "yellow",
       alertInterpretation: frame.interpretation || {
-        title: "Firely stream warning",
-        rhythm: "The dashboard could not fetch the latest Firely Observations.",
+        title: "FHIR stream warning",
+        rhythm: "The dashboard could not fetch the latest FHIR Observations.",
         ppg: "Local waveform simulation is still running.",
         likelyEtiology: "Check whether the FastAPI backend is running on port 8000."
       }
@@ -207,8 +207,8 @@ function mergeFirelyFrameIntoLive(prev, frame) {
 
   const next = {
     ...prev,
-    firelyStatus: frame.status || "connected",
-    firelySource: frame.source || "firely-public-sandbox",
+    fhirStatus: frame.status || "connected",
+    fhirSource: frame.source || "fhir-provider",
     streamTimestamp: frame.timestamp || frame.receivedAt,
     fallbackUsed: frame.fallbackUsed || [],
 
@@ -280,8 +280,8 @@ function createInitialLiveState() {
     potassiumTrend: [3.9, 4.2, 4.6, 5.1, 5.4],
     creatinineTrend: [0.89, 0.96, 1.05, 1.23, 1.42],
     wbcTrend: [8.2, 9.1, 10.4, 11.2, 12.1],
-    firelyStatus: "local",
-firelySource: "local-simulation",
+    fhirStatus: "local",
+fhirSource: "local-simulation",
 streamTimestamp: null,
 fallbackUsed: [],
 priorityTrends: [],
@@ -305,7 +305,7 @@ colors: {
 
 function nextLiveState(prev) {
   const tick = prev.tick + 1;
-  const usingFirely = prev.firelyStatus === "connected";
+  const usingFhir = prev.fhirStatus === "connected";
 
   const simulatedHeartRate = Math.round(
     clamp(160 + Math.sin(tick / 4) * 7 + Math.sin(tick / 11) * 4, 146, 174)
@@ -347,16 +347,16 @@ function nextLiveState(prev) {
     clamp(12.1 + Math.sin(tick / 7) * 0.5, 11.4, 12.9).toFixed(1)
   );
 
-  const heartRate = usingFirely ? prev.heartRate : simulatedHeartRate;
-  const respiratoryRate = usingFirely ? prev.respiratoryRate : simulatedRespiratoryRate;
-  const spo2 = usingFirely ? prev.spo2 : simulatedSpo2;
-  const systolic = usingFirely ? prev.systolic : simulatedSystolic;
-  const diastolic = usingFirely ? prev.diastolic : simulatedDiastolic;
-  const temperature = usingFirely ? prev.temperature : simulatedTemperature;
-  const glucose = usingFirely ? prev.glucose : simulatedGlucose;
-  const potassium = usingFirely ? prev.potassium : simulatedPotassium;
-  const creatinine = usingFirely ? prev.creatinine : simulatedCreatinine;
-  const wbc = usingFirely ? prev.wbc : simulatedWbc;
+  const heartRate = usingFhir ? prev.heartRate : simulatedHeartRate;
+  const respiratoryRate = usingFhir ? prev.respiratoryRate : simulatedRespiratoryRate;
+  const spo2 = usingFhir ? prev.spo2 : simulatedSpo2;
+  const systolic = usingFhir ? prev.systolic : simulatedSystolic;
+  const diastolic = usingFhir ? prev.diastolic : simulatedDiastolic;
+  const temperature = usingFhir ? prev.temperature : simulatedTemperature;
+  const glucose = usingFhir ? prev.glucose : simulatedGlucose;
+  const potassium = usingFhir ? prev.potassium : simulatedPotassium;
+  const creatinine = usingFhir ? prev.creatinine : simulatedCreatinine;
+  const wbc = usingFhir ? prev.wbc : simulatedWbc;
 
   const nextState = {
     ...prev,
@@ -380,7 +380,7 @@ function nextLiveState(prev) {
     ppgSoft: buildStrip((index, currentTick) => ppgValue(index, currentTick, true), tick)
   };
 
-  if (usingFirely) {
+  if (usingFhir) {
     return nextState;
   }
 
@@ -650,45 +650,48 @@ export default function ClinicalPhysiologyPage({ patient, onOpenLabs }) {
   }, []);
 
 useEffect(() => {
-  const provider = "oracle";
+  const provider = import.meta.env.VITE_FHIR_PROVIDER || "epic";
+
+  const streamPatientId =
+    patient?.fhirId ||
+    import.meta.env.VITE_FHIR_PATIENT_ID ||
+    "";
 
   console.log("[KGEN FHIR STREAM CONFIG]", {
-  provider,
-  streamUrl: import.meta.env.VITE_FHIR_STREAM_URL,
-  envPatientId: import.meta.env.VITE_FHIR_PATIENT_ID
-});
-
-  const streamPatientId = "";
+    provider,
+    streamUrl: import.meta.env.VITE_FHIR_STREAM_URL,
+    streamPatientId
+  });
 
   const disconnect = connectFhirStream({
     provider,
     patientId: streamPatientId,
     onFrame: (frame) => {
-  console.log("[KGEN PAGE FRAME RECEIVED]", {
-    source: frame.source,
-    status: frame.status,
-    receivedAt: frame.receivedAt,
-    fhirFields: frame.dataQuality?.fhirFields,
-    fallbackFields: frame.dataQuality?.fallbackFields,
-    observationCount: frame.dataQuality?.observationCount,
-    matchedObservationCount: frame.dataQuality?.matchedObservationCount,
-    vitals: frame.vitals,
-    labs: frame.labs
-  });
+      console.log("[KGEN PAGE FRAME RECEIVED]", {
+        source: frame.source,
+        status: frame.status,
+        receivedAt: frame.receivedAt,
+        fhirFields: frame.dataQuality?.fhirFields,
+        fallbackFields: frame.dataQuality?.fallbackFields,
+        observationCount: frame.dataQuality?.observationCount,
+        matchedObservationCount: frame.dataQuality?.matchedObservationCount,
+        vitals: frame.vitals,
+        labs: frame.labs
+      });
 
-  setLive((prev) => mergeFirelyFrameIntoLive(prev, frame));
-},
+      setLive((prev) => mergeFhirFrameIntoLive(prev, frame));
+    },
     onHeartbeat: () => {
       setLive((prev) => ({
         ...prev,
-        firelyStatus:
-          prev.firelyStatus === "local" ? "connecting" : prev.firelyStatus
+        fhirStatus:
+          prev.fhirStatus === "local" ? "connecting" : prev.fhirStatus
       }));
     },
     onError: () => {
       setLive((prev) => ({
         ...prev,
-        firelyStatus: "error",
+        fhirStatus: "error",
         alertColor: "yellow",
         alertInterpretation: {
           title: "FHIR stream warning",
@@ -702,6 +705,8 @@ useEffect(() => {
 
   return disconnect;
 }, [patient?.fhirId, patient?.id]);
+
+
 
   const currentPatient = useMemo(() => {
     if (!patient) return BASE_PATIENT;
