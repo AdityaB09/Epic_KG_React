@@ -94,52 +94,154 @@ async def fetch_epic_observations(
             "Use Epic EHR launch patient context or set EPIC_TEST_PATIENT_ID for sandbox testing."
         )
 
+    # Epic often rejects very broad Observation searches.
+    # Search category-specific Observations instead of:
+    # Observation?_count=200&subject=Patient/{id}
+    vital_loinc_codes = ",".join(
+        [
+            "http://loinc.org|8867-4",   # Heart rate
+            "http://loinc.org|9279-1",   # Respiratory rate
+            "http://loinc.org|59408-5",  # Oxygen saturation
+            "http://loinc.org|8480-6",   # Systolic BP
+            "http://loinc.org|8462-4",   # Diastolic BP
+            "http://loinc.org|8310-5",   # Body temperature
+        ]
+    )
+
+    lab_loinc_codes = ",".join(
+        [
+            "http://loinc.org|2339-0",   # Glucose
+            "http://loinc.org|2345-7",   # Glucose
+            "http://loinc.org|2823-3",   # Potassium
+            "http://loinc.org|2160-0",   # Creatinine
+            "http://loinc.org|6690-2",   # WBC / Leukocytes
+        ]
+    )
+
     search_attempts = [
-        {
-            "_count": "200",
-            "_sort": "-date",
-            "patient": patient_id,
-        },
-        {
-            "_count": "200",
-            "patient": patient_id,
-        },
-        {
-            "_count": "200",
-            "subject": f"Patient/{patient_id}",
-        },
+        (
+            "vital-signs category",
+            {
+                "patient": patient_id,
+                "category": "vital-signs",
+            },
+        ),
+        (
+            "laboratory category",
+            {
+                "patient": patient_id,
+                "category": "laboratory",
+            },
+        ),
+        (
+            "vital signs LOINC codes",
+            {
+                "patient": patient_id,
+                "code": vital_loinc_codes,
+            },
+        ),
+        (
+            "lab LOINC codes",
+            {
+                "patient": patient_id,
+                "code": lab_loinc_codes,
+            },
+        ),
     ]
 
-    last_error: Exception | None = None
+    combined_entries: list[dict[str, Any]] = []
+    seen_resource_keys: set[tuple[str | None, str | None]] = set()
+    search_debug: list[dict[str, Any]] = []
 
-    for params in search_attempts:
+    for label, params in search_attempts:
         if settings.DEBUG_FHIR_LOGS:
             print("\n[FHIR REQUEST] provider=epic resource=Observation")
+            print("SEARCH LABEL:", label)
             print("BASE:", base_url)
             print("PARAMS:", params)
             print("TOKEN:", "present" if access_token else "missing")
 
         try:
-            return await fhir_get(
+            bundle = await fhir_get(
                 base_url,
                 "/Observation",
                 params=params,
                 access_token=access_token,
             )
+
+            entries = bundle.get("entry", []) or []
+
+            search_debug.append(
+                {
+                    "label": label,
+                    "ok": True,
+                    "bundleTotal": bundle.get("total"),
+                    "entryCount": len(entries),
+                    "params": params,
+                }
+            )
+
+            for entry in entries:
+                resource = entry.get("resource", {}) if isinstance(entry, dict) else {}
+                resource_key = (
+                    resource.get("resourceType"),
+                    resource.get("id"),
+                )
+
+                if resource_key in seen_resource_keys:
+                    continue
+
+                seen_resource_keys.add(resource_key)
+                combined_entries.append(entry)
+
         except httpx.HTTPStatusError as error:
-            last_error = error
+            error_text = ""
+            try:
+                error_text = error.response.text[:800]
+            except Exception:
+                error_text = str(error)
 
-            if error.response.status_code in {400, 404}:
-                continue
+            search_debug.append(
+                {
+                    "label": label,
+                    "ok": False,
+                    "statusCode": error.response.status_code,
+                    "params": params,
+                    "error": error_text,
+                }
+            )
 
-            raise
+            if settings.DEBUG_FHIR_LOGS:
+                print("[FHIR ERROR] provider=epic resource=Observation")
+                print("SEARCH LABEL:", label)
+                print("STATUS:", error.response.status_code)
+                print("BODY:", error_text)
 
-    return empty_bundle(
-        "Epic Observation search failed for all patient search attempts. "
-        f"Last error: {str(last_error)}"
-    )
+            # Continue trying the next Epic-supported search shape.
+            continue
 
+    combined_bundle = {
+        "resourceType": "Bundle",
+        "type": "searchset",
+        "total": len(combined_entries),
+        "entry": combined_entries,
+        "searchDebug": search_debug,
+    }
 
+    if not combined_entries:
+        combined_bundle["issue"] = [
+            {
+                "severity": "information",
+                "code": "informational",
+                "diagnostics": (
+                    "Epic SMART session is valid, but Epic returned zero Observation entries "
+                    "for this selected patient using category/code searches. Try another LaunchPad patient, "
+                    "or inspect searchDebug for the exact Epic response."
+                ),
+            }
+        ]
+
+    return combined_bundle
 
 
 async def fetch_epic_patient_resources(
