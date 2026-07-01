@@ -1,0 +1,1 @@
+export { connectFhirStream as connectFirelyStream } from "./fhirStream";
